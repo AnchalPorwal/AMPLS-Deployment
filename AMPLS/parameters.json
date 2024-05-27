@@ -1,0 +1,52 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "value": "eastus"
+        },
+        "vmName":{
+            "value": "vm-win-001"
+        },
+        "loganalyticsworkspacename": {
+            "value": "la-workspace-001"
+        },
+        "logAnalyticsWorkspaceSku": {
+            "value": "PerGB2018"
+        },
+        "VNetCloudNSGName" : {
+            "value": "VNetCloudNSG"
+        },
+        "VNetCloudName" : {
+            "value" : "VnetCloud"
+        },
+        "amplsname" : {
+            "value": "geampls"
+        },
+        "amplsprivateendpointname" : {
+            "value": "amplspe"
+        },
+        "amplspeconnection" : {
+            "value": "pe-ampls-connection"
+        },
+        "dnszonegroupname" : {
+            "value": "pvtEndpointDnsGroupForAmpls"
+        },
+        "amplsScopedlawname" : {
+            "value": "amplsscopedlaw"
+        },
+        "amplsScopedDCEname" :{
+            "value": "amplsscopedDCE"
+        },
+        "keyVaultName" : {
+            "value": "kv-logic-app-poc-0033"
+        },
+        "keyVaultSubscription" : {
+            "value": "eb093424-9e6c-48cc-b0d3-c12f53a58ffc"
+        },
+        "keyVaultResourceGroup" : {
+            "value": "POC-Logic-App"
+        }
+        
+    }
+}

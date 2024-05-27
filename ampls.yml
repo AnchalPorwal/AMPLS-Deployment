@@ -1,0 +1,161 @@
+trigger: none
+pr: none
+
+pool:
+  name: logicapp-vmss-agent-pool-01
+
+parameters:
+   - name : Location
+     displayName: Location
+     default: Eastus2
+     values:
+      - Eastus2
+      - westus
+      - centralus
+   - name : resourceGroupName
+     displayName: Keyvault-RG-Name
+     default: AutomationResources
+   - name : keyVaultName
+     displayName: keyVaultName
+     default: automationResource
+   - name : centralkeyvault
+     displayName: select secrets based on tenant name
+     default: cyber
+     values:
+      - cxo
+      - core
+      - cyber
+
+name: 'INFRA_DEPLOY_Tenent_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)'
+stages:
+################ Linting and Validation ########################################
+- stage: Build
+  displayName: Build bicep code
+  jobs:
+        - job:
+          displayName: Build bicep code
+          steps:
+          - checkout: self
+          - pwsh: |
+              Get-ChildItem -Path $(Build.SourcesDirectory) -Filter *.bicep | foreach { az bicep build -f $_.FullName }
+            displayName: 'Run Bicep linter'   
+          
+- stage: AkvSecret
+  displayName: Fetch keyvault Secrets
+  jobs:
+    - job: akvSecretdeploy
+      displayName: Key Vault Secret fetch
+      steps:
+      - checkout: self
+      - pwsh: |
+         Install-Module -Name Az -Repository PSGallery -Force
+         Import-Module Az.Accounts
+      - task: AzurePowerShell@5
+        name: akvsecretgenerate
+        inputs:
+          azureSubscription: 'SPN-core1'
+          ScriptType: 'InlineScript'
+          Inline: |
+            $resourceGroupName = "${{ parameters.resourceGroupName }}"
+            $keyVaultName =  "${{ parameters.keyVaultName }}"               
+            $clientIDSecretName = "clientid-${{ parameters.centralkeyvault }}"
+            Write-Host "$clientIDSecretName"
+            $clientSecretSecretName = "clientsecret-${{ parameters.centralkeyvault }}"
+            $tenantIDSecretName = "tenantid-${{ parameters.centralkeyvault }}"                  
+            # Authenticate to Azure and fetch secrets from Key Vault
+            $keyVaultSecrets = @{
+                "clientid" = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $clientIDSecretName -AsPlainText   
+                "clientsecret" = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $clientSecretSecretName -AsPlainText   
+                "tenantid" = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $tenantIDSecretName -AsPlainText   
+            }  
+            $clientid =  $($keyVaultSecrets['clientid']) 
+            $clientsecret = $($keyVaultSecrets['clientsecret'])
+            $tenantid =  $($keyVaultSecrets['tenantid'])       
+            Write-Host "##vso[task.setvariable variable=clientid;isOutput=true]$clientid"
+            Write-Host "##vso[task.setvariable variable=clientsecret;isOutput=true]$clientsecret"
+            Write-Host "##vso[task.setvariable variable=tenantid;isOutput=true]$tenantid"
+          FailOnStandardError: true
+          azurePowerShellVersion: 'LatestVersion'
+      - task: CopyFiles@2
+        inputs:
+          sourceFolder: '$(Build.SourcesDirectory)'
+          targetFolder: '$(Build.ArtifactStagingDirectory)'
+
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: $(System.DefaultWorkingDirectory)
+          artifactName: infratenantlevel
+
+- stage: Valdiate_AMPLS
+  displayName: Validate AMPLS
+  dependsOn: AkvSecret
+  jobs: 
+       - job: ValidateSubscriptionmodule
+         variables:
+            clientid: $[stageDependencies.AkvSecret.akvSecretdeploy.outputs['akvsecretgenerate.clientid']]
+            clientsecret: $[stageDependencies.AkvSecret.akvSecretdeploy.outputs['akvsecretgenerate.clientsecret']]
+            tenantid: $[stageDependencies.AkvSecret.akvSecretdeploy.outputs['akvsecretgenerate.tenantid']]
+         displayName: Validate  module
+         steps:
+           - task: DownloadBuildArtifacts@0
+             inputs:
+                 buildType: 'current'
+                 downloadType: 'single'
+                 artifactName: 'infratenantlevel'
+                 downloadPath: '$(System.ArtifactsDirectory)'
+                 
+           - task: AzureKeyVault@2
+             inputs:
+               azureSubscription: 'SPN-core1'
+               KeyVaultName: 'automationResource'
+               SecretsFilter: '*'
+               RunAsPreJob: true
+  
+           - task: Bash@3
+             displayName: 'AMPLS'
+             enabled: true
+             inputs:
+              targetType: 'inline'
+              script: |             
+                  az --version
+                  az login --service-principal -u $(clientid-cyber) -p $(clientsecret-cyber) --tenant $(tenantid-cyber)
+                  az deployment group create  --resource-group amplstesting --template-file ./AMPLS/ampls.bicep --parameters ./AMPLS/parameters.json  --what-if
+
+- stage: Deploy_AMPLS
+  displayName: Deploy AMPLS
+  dependsOn: 
+   - AkvSecret
+   - Valdiate_AMPLS
+
+
+  jobs: 
+       - job: ValidateSubscriptionmodule
+         variables:
+            clientid: $[stageDependencies.AkvSecret.akvSecretdeploy.outputs['akvsecretgenerate.clientid']]
+            clientsecret: $[stageDependencies.AkvSecret.akvSecretdeploy.outputs['akvsecretgenerate.clientsecret']]
+            tenantid: $[stageDependencies.AkvSecret.akvSecretdeploy.outputs['akvsecretgenerate.tenantid']]
+         displayName: Validate  module
+         steps:
+           - task: DownloadBuildArtifacts@0
+             inputs:
+                 buildType: 'current'
+                 downloadType: 'single'
+                 artifactName: 'infratenantlevel'
+                 downloadPath: '$(System.ArtifactsDirectory)'
+                 
+           - task: AzureKeyVault@2
+             inputs:
+               azureSubscription: 'SPN-core1'
+               KeyVaultName: 'automationResource'
+               SecretsFilter: '*'
+               RunAsPreJob: true
+  
+           - task: Bash@3
+             displayName: 'AMPLS'
+             enabled: true
+             inputs:
+              targetType: 'inline'
+              script: |             
+                  az --version
+                  az login --service-principal -u $(clientid-cyber) -p $(clientsecret-cyber) --tenant $(tenantid-cyber)
+                  az deployment group create  --resource-group amplstesting --template-file ./AMPLS/ampls.bicep --parameters ./AMPLS/parameters.json
